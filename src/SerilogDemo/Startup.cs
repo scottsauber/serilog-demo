@@ -1,19 +1,12 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.HttpsPolicy;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.Identity.Web;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Microsoft.OpenApi.Models;
+using SerilogDemo.Infrastructure;
 
 namespace SerilogDemo
 {
@@ -30,13 +23,18 @@ namespace SerilogDemo
         public void ConfigureServices(IServiceCollection services)
         {
             services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-                .AddMicrosoftIdentityWebApi(Configuration.GetSection("AzureAdB2C"));
+                .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(JwtBearerDefaults.AuthenticationScheme,
+                    options => { });
 
             services.AddControllers();
+            services.AddHttpContextAccessor();
+
             services.AddSwaggerGen(c =>
             {
-                c.SwaggerDoc("v1", new OpenApiInfo { Title = "SerilogDemo", Version = "v1" });
+                c.SwaggerDoc("v1", new OpenApiInfo {Title = "SerilogDemo", Version = "v1"});
             });
+            
+            services.AddScoped(typeof(ILoggerService<>), typeof(LoggerService<>));
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
@@ -51,15 +49,17 @@ namespace SerilogDemo
 
             app.UseHttpsRedirection();
 
+            app.UseSerilogLogContextNoAuth();
+
             app.UseRouting();
 
             app.UseAuthentication();
+
+            app.UseSerilogLogContextWithAuth();
+            
             app.UseAuthorization();
 
-            app.UseEndpoints(endpoints =>
-            {
-                endpoints.MapControllers();
-            });
+            app.UseEndpoints(endpoints => { endpoints.MapControllers(); });
         }
     }
 }

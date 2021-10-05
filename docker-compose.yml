@@ -1,0 +1,10 @@
+version: "3.9"  # optional since v1.27.0
+services:
+  seq:
+    image: datalust/seq
+    ports:
+      - "80:80"
+      - "5341:5341"
+    environment:
+      ACCEPT_EULA: "Y"
+      SEQ_FIRSTRUN_ADMINPASSWORDHASH: "FLQFkNEw8i8sGE0S09qXr7wUsvsIqs4SfOO2v6zhiEkZHWdLAA=="
