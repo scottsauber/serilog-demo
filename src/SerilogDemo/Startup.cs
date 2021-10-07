@@ -1,65 +1,67 @@
-using Microsoft.AspNetCore.Builder;
+using System;
+using System.IO;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Authentication;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.OpenApi.Models;
+using Serilog;
+using Serilog.Debugging;
+using Serilog.Events;
+using Serilog.Formatting.Display;
 using SerilogDemo.Infrastructure;
 
 namespace SerilogDemo
 {
-    public class Startup
+    public class Program
     {
-        public Startup(IConfiguration configuration)
+        public static int Main(string[] args)
         {
-            Configuration = configuration;
+            var loggerConfiguration = CreateLoggerConfiguration();
+
+            Log.Logger = loggerConfiguration.CreateLogger();
+
+            try
+            {
+                Log.Information("Starting web host");
+                CreateHostBuilder(args).Build().Run();
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Log.Fatal(ex, "Host terminated unexpectedly");
+                return 1;
+            }
+            finally
+            {
+                Log.CloseAndFlush();
+            }
         }
 
-        public IConfiguration Configuration { get; }
-
-        // This method gets called by the runtime. Use this method to add services to the container.
-        public void ConfigureServices(IServiceCollection services)
+        private static LoggerConfiguration CreateLoggerConfiguration()
         {
-            services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-                .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(JwtBearerDefaults.AuthenticationScheme,
-                    options => { });
+            var file = File.CreateText(Directory.GetCurrentDirectory() + "/serilog.log");
+            SelfLog.Enable(TextWriter.Synchronized(file));
 
-            services.AddControllers();
-            services.AddHttpContextAccessor();
+            var environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
 
-            services.AddSwaggerGen(c =>
-            {
-                c.SwaggerDoc("v1", new OpenApiInfo {Title = "SerilogDemo", Version = "v1"});
-            });
+            var outputTemplate = "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level}] {NewLine} {Message:lj}{NewLine} CorrelationId: {CorrelationId}{NewLine} " + SerilogProperties.MessageTemplateWithAllProperties + " {NewLine}{Exception}";
+            var loggerConfiguration = new LoggerConfiguration()
+                .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
+                .Enrich.FromLogContext()
+                .Enrich.WithCorrelationIdHeader("x-vermeer-correlation-id")
+                .WriteTo.Console(new MessageTemplateTextFormatter(outputTemplate))
+                .WriteTo.File("log.log", rollingInterval: RollingInterval.Hour, rollOnFileSizeLimit: true, fileSizeLimitBytes: 25_000_000, outputTemplate: outputTemplate)
+                .WriteTo.Seq("http://localhost:5341");
             
-            services.AddScoped(typeof(ILoggerService<>), typeof(LoggerService<>));
-        }
-
-        // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
-        public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
-        {
-            if (env.IsDevelopment())
+            if (environment == Environments.Development)
             {
-                app.UseDeveloperExceptionPage();
-                app.UseSwagger();
-                app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "SerilogDemo v1"));
+                loggerConfiguration = loggerConfiguration.MinimumLevel.Override("SerilogDemo", LogEventLevel.Debug);
             }
 
-            app.UseHttpsRedirection();
-
-            app.UseSerilogLogContextNoAuth();
-
-            app.UseRouting();
-
-            app.UseAuthentication();
-
-            app.UseSerilogLogContextWithAuth();
-            
-            app.UseAuthorization();
-
-            app.UseEndpoints(endpoints => { endpoints.MapControllers(); });
+            return loggerConfiguration;
         }
+
+        public static IHostBuilder CreateHostBuilder(string[] args) =>
+            Host.CreateDefaultBuilder(args)
+                .UseSerilog()
+                .ConfigureWebHostDefaults(webBuilder => { webBuilder.UseStartup<Startup>(); });
     }
 }
